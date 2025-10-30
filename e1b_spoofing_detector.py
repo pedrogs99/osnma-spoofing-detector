@@ -59,10 +59,36 @@ class Spoofer:
         self.rng = np.random.default_rng(seed)
 
     # ------------------------------------------------------------------
-    def spoof(self, bits: np.ndarray) -> np.ndarray:
-        mask = self.rng.random(size=bits.size) < self.error_prob
-        spoofed = bits.copy()
-        spoofed[mask] *= -1  # inverts marked bits
+    def spoof(self, samples: np.ndarray, samples_per_symbol: int) -> np.ndarray:
+        """Flip the first window of each symbol with probability *error_prob*."""
+        out = samples.copy()
+        wlen = int(samples_per_symbol * 0.125)      # 0.5 ms window
+        n_symbols = len(samples) // samples_per_symbol
+
+        for k in range(n_symbols):
+            if self.rng.random() < self.error_prob:
+                start = k * samples_per_symbol
+                out[start : start + wlen] *= -1      # invert only the first window
+        return out
+    
+    def spoof_sample(self, samples: np.ndarray, samples_per_symbol: int, window_fraction: float = 0.125) -> np.ndarray:
+        """Flip each *sample* in the first window with probability P."""
+        wlen  = int(samples_per_symbol * window_fraction)
+        if wlen < 1:
+            raise ValueError("window too short; adjust samples_per_symbol or window_fraction")
+        
+        total = len(samples)
+
+        # Build a boolean mask that selects ONLY the first window of EVERY symbol
+        first_windows = np.zeros(total, dtype=bool)
+        for k in range(total // samples_per_symbol):
+            start = k * samples_per_symbol
+            first_windows[start : start + wlen] = True
+
+        # For those positions, decide flips with independent probability P
+        flip_mask = first_windows & (self.rng.random(total) < self.error_prob)
+        spoofed   = samples.copy()
+        spoofed[flip_mask] *= -1
         return spoofed
 
 ################################################################################
@@ -100,24 +126,33 @@ class PartialCorrelator:
 ################################################################################
 
 if __name__ == "__main__":
-    NUM_SYMBOLS = 100  # quick test
+    SAMPLES_PER_CHIP   = 16
+    CHIPS_PER_SYMBOL   = 4092
+    SAMPLES_PER_SYMBOL = CHIPS_PER_SYMBOL * SAMPLES_PER_CHIP
 
-    # Generate "authentic" sequence
-    gen = E1BSignalGenerator()
+    NUM_SYMBOLS        = 1000
+
+    # 1) authentic signal
+    gen = E1BSignalGenerator(samples_per_symbol=SAMPLES_PER_SYMBOL)
     bits = gen.generate_bits(NUM_SYMBOLS, seed=42)
+    samples  = gen.bits_to_samples(bits)
 
-    # Currently no spoofer (error_prob = 0)
-    spoofer = Spoofer(error_prob=0.0, seed=24)
-    spoofed_bits = spoofer.spoof(bits)
+    # 2) spoofer: flip the first window of each symbol with X % probability
+    spoofer    = Spoofer(error_prob=0, seed=24)
+    spoofed    = spoofer.spoof(samples, gen.samples_per_symbol)
 
-    # Convert to samples
-    samples = gen.bits_to_samples(spoofed_bits)
-
-    # Partial correlation
+    # 3) partial-correlation metric
     correlator = PartialCorrelator(window_fraction=0.125)
-    metric = correlator.sequence_metric(samples, gen.samples_per_symbol)
+    metric = correlator.sequence_metric(spoofed, gen.samples_per_symbol)
+    print(f"Partial-correlation metric: {metric:.3f}")
 
-    print(f"Partial correlation metric (without spoofer): {metric:.2f}")
+    # 4) quick debug on the first 20 samples
+    dbg = 20
+    print("Original:", samples[:dbg])
+    print("Spoofed :", spoofed[:dbg])
+    print("Flipped :", (samples[:dbg] != spoofed[:dbg]).astype(int))
+
+
 
     # ------------------------------------------------------------------
     # TODO: Add AWGN and iterate to calculate ROC curves
