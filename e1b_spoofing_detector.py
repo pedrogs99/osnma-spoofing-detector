@@ -312,12 +312,13 @@ if __name__ == "__main__":
     auth_samples = gen.bits_to_samples(bits)
 
     # 2) spoofer: flip samples in the first window of each symbol with X % probability
-    spoofer      = Spoofer(error_prob=0, seed=48)
+    spoofer      = Spoofer(error_prob=0.0, seed=48)
     recv_samples = spoofer.spoof_sample(auth_samples, gen.samples_per_symbol)
 
     # 3) AWGN channel: e.g. SNR = 20 dB
     channel      = AWGNChannel(snr_db=40.0, seed=24)
     noisy_recv   = channel.add_noise(recv_samples)
+    #noisy_recv=recv_samples
 
     # 4) partial-correlation metrics R1, R2, R3
     correlator = PartialCorrelator(window_fraction=0.125)
