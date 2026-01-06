@@ -232,11 +232,10 @@ def run_many_symbols_stats() -> tuple[int, int]:
     noisy_recv = chan_rx.add_noise(spoofed)
 
     correlator = PartialCorrelator(window_fraction=WINDOW_FRACTION_CORR)
-    Bbeg, Bend = correlator.partial_correlations(
+    Bbeg, Bend, bhat = correlator.partial_correlations(
         local_code_samples,
         noisy_recv,
         samples_per_symbol,
-        bits,
     )
 
     ber = spoofer_ber(bits, bhat_final)
@@ -460,7 +459,7 @@ def run_cn0_spoofer_sweep(cn0_list_dbhz: list[float]):
     chan_rx = AWGNChannel(cn0_db_hz=CN0_RX_DBHZ, chip_rate_hz=chip_rate_hz, seed=200)
     baseline_recv = chan_rx.add_noise(tx_samples)
 
-    Bbeg0, Bend0 = correlator.partial_correlations(local_code_samples, baseline_recv, samples_per_symbol, bits)
+    Bbeg0, Bend0, bhat0 = correlator.partial_correlations(local_code_samples, baseline_recv, samples_per_symbol)
     met0 = correlator.r_metrics(Bbeg0, Bend0)
 
     print("\n=== CN0 sweep (spoofer input) ===")
@@ -486,7 +485,7 @@ def run_cn0_spoofer_sweep(cn0_list_dbhz: list[float]):
         # Receptor
         noisy_recv = chan_rx.add_noise(spoofed)
 
-        Bbeg, Bend = correlator.partial_correlations(local_code_samples, noisy_recv, samples_per_symbol, bits)
+        Bbeg, Bend, bhat = correlator.partial_correlations(local_code_samples, noisy_recv, samples_per_symbol)
         met = correlator.r_metrics(Bbeg, Bend)
 
         ber = spoofer_ber(bits, bhat_final)
@@ -669,8 +668,8 @@ def plot_metrics_convergence(correlator: PartialCorrelator,
     chan_rx = AWGNChannel(cn0_db_hz=cn0_rx_dbhz, chip_rate_hz=chip_rate_hz, seed=999)
     noisy_recv_base = chan_rx.add_noise(tx_samples)
 
-    Bbeg_a, Bend_a = correlator.partial_correlations(local_code_samples, noisy_recv_attack, samples_per_symbol, bits)
-    Bbeg_b, Bend_b = correlator.partial_correlations(local_code_samples, noisy_recv_base,  samples_per_symbol, bits)
+    Bbeg_a, Bend_a, bhat_a = correlator.partial_correlations(local_code_samples, noisy_recv_attack, samples_per_symbol)
+    Bbeg_b, Bend_b, bhat_b = correlator.partial_correlations(local_code_samples, noisy_recv_base, samples_per_symbol)
 
     N = Bbeg_a.size
     x = np.arange(1, N + 1)

@@ -25,8 +25,11 @@ class PartialCorrelator:
         self,
         auth_sym: np.ndarray,
         recv_sym: np.ndarray,
-        symbol_bit: float,
-    ) -> tuple[float, float]:
+    ) -> tuple[float, float, float]:
+        """
+        Returns (Bbeg_aligned, Bend_aligned, bhat)
+        where bhat is the estimated symbol sign (+1/-1) from the late window.
+        """
         if auth_sym.shape != recv_sym.shape:
             raise ValueError("auth_sym and recv_sym must have the same length")
 
@@ -40,17 +43,24 @@ class PartialCorrelator:
         recv_beg = recv_sym[:wlen]
         recv_end = recv_sym[-wlen:]
 
-        # Para señales reales, vdot == dot (vdot solo añade conjugado)
+        # Raw partial correlations
         Bbeg_raw = float(np.dot(auth_beg, recv_beg))
         Bend_raw = float(np.dot(auth_end, recv_end))
 
-        b = float(symbol_bit)
-        if b not in (-1.0, 1.0):
-            raise ValueError("symbol_bit must be +/-1")
+        # Realistic wipe-off: estimate symbol sign from late window
+        # (handle exact zero conservatively)
+        if Bend_raw > 0.0:
+            bhat = 1.0
+        elif Bend_raw < 0.0:
+            bhat = -1.0
+        else:
+            # tie-breaker (rare): fall back to beg, or set +1
+            bhat = 1.0 if Bbeg_raw >= 0.0 else -1.0
 
-        Bbeg = b * Bbeg_raw
-        Bend = b * Bend_raw
-        return Bbeg, Bend
+        # Align both partial correlations to a common sign
+        Bbeg = bhat * Bbeg_raw
+        Bend = bhat * Bend_raw  # == abs(Bend_raw) except tie
+        return Bbeg, Bend, bhat
 
     # ------------------------------------------------------------------
     def partial_correlations(
@@ -58,11 +68,10 @@ class PartialCorrelator:
         auth_samples: np.ndarray,
         recv_samples: np.ndarray,
         samples_per_symbol: int,
-        bits: np.ndarray,
-    ) -> tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
-        Compute Bbeg(k) and Bend(k) for all symbols.
-        Returns two complex-valued arrays of length Nb.
+        Compute Bbeg(k) and Bend(k) for all symbols using realistic sign estimation.
+        Returns (Bbeg, Bend, bhat_arr).
         """
         if len(auth_samples) != len(recv_samples):
             raise ValueError("auth_samples and recv_samples must have the same length")
@@ -70,22 +79,20 @@ class PartialCorrelator:
             raise ValueError("Total number of samples is not a multiple of samples_per_symbol.")
 
         n_symbols = len(auth_samples) // samples_per_symbol
-        if len(bits) != n_symbols:
-            raise ValueError("Length of bits must be equal to number of symbols")
 
         auth_reshaped = auth_samples.reshape(n_symbols, samples_per_symbol)
         recv_reshaped = recv_samples.reshape(n_symbols, samples_per_symbol)
 
         Bbeg = np.zeros(n_symbols, dtype=float)
         Bend = np.zeros(n_symbols, dtype=float)
+        bhat = np.zeros(n_symbols, dtype=float)
 
         for k in range(n_symbols):
-            Bbeg[k], Bend[k] = self._per_symbol_partial_corr(
+            Bbeg[k], Bend[k], bhat[k] = self._per_symbol_partial_corr(
                 auth_reshaped[k],
                 recv_reshaped[k],
-                bits[k],
             )
-        return Bbeg, Bend
+        return Bbeg, Bend, bhat
 
     # ------------------------------------------------------------------
     def r_metrics(
@@ -128,10 +135,9 @@ class PartialCorrelator:
         1) compute Bbeg(k), Bend(k);
         2) compute R1, R2, R3.
         """
-        Bbeg, Bend = self.partial_correlations(
+        Bbeg, Bend, bhat = self.partial_correlations(
             auth_samples,
             recv_samples,
             samples_per_symbol,
-            bits,
         )
         return self.r_metrics(Bbeg, Bend)
