@@ -1,80 +1,188 @@
-# OSNMA E1-B Partial-Correlation Spoofing Detector
+# OSNMA E1-B Partial-Correlation Detector (SCER / Replay)
 
-A lightweight research prototype—built for my Master’s Thesis—designed to detect spoofing attacks on the Galileo E1-B navigation signal using **partial-correlation metrics**. The project progresses from a noise-free toy model to a full Monte-Carlo simulation with ROC analysis.
+Research prototype developed for a Master’s Thesis on software-only detection of Galileo OSNMA replay (SCER-like) spoofing using sample-level partial-correlation statistics computed over Galileo E1-B I/NAV symbols.
 
-> **Status**: 🚧 *phase 0* — baseline implementation without noise or active spoofer.
+The implementation includes:
+- A chip-rate signal model (one sample per chip)
+- A C/N0-driven AWGN channel
+- A SCER-style spoofer that estimates per-symbol signs via running correlation and replays a synthesized signal
+- A partial-correlator that computes early/late partial correlations per symbol and aggregates them into R1/R2/R3
+- A Monte Carlo experiment framework with threshold calibration and ROC generation
 
----
-
-## ✨ Key Features (current & planned)
-
-| Phase | Module                   | Purpose                                                                                                      |
-| ----- | ------------------------ | ------------------------------------------------------------------------------------------------------------ |
-| 0     | **`E1BSignalGenerator`** | Generates +1/-1 symbol streams and expands them to discrete samples (4 ms per symbol, 8 samples per symbol). |
-| 0     | **`PartialCorrelator`**  | Computes correlation between the first and last 0.5 ms of each symbol; averages over the sequence.           |
-| 0     | **`Spoofer`** *(stub)*   | Flips symbols with configurable probability `error_prob` (initially 0).                                      |
-| 1     | **AWGN Noise**           | Additive white Gaussian noise with controllable SNR.                                                         |
-| 2     | **ROC & Thresholding**   | Automate Monte-Carlo runs to estimate ${P_D}$ / ${P_{FA}}$ and plot ROC curves.                              |
-| 3     | **CLI & Plots**          | Command-line interface, Matplotlib plots, exportable CSV results.                                            |
+Note: This repository is intended for research and reproducibility, not for operational GNSS receiver integration.
 
 ---
 
-## 📂 Project Structure
+## 1. Core idea
 
-```
-project/
-│  e1b_spoofing_detector.py      # Main skeleton (run this first)
-│  requirements.txt              # Python dependencies
-│  README.md                     # You are here
-└─ .vscode/                      # VS Code launch & settings (not essential)
-```
+For each symbol, the receiver forms partial correlations over an early and late window inside the symbol:
+- Bbeg: correlation over the first window
+- Bend: correlation over the last window
 
----
+A realistic wipe-off alignment is applied by estimating the symbol sign (bhat) from the full-symbol correlation, and using it to align both partial correlations.
 
-## 🚀 Getting Started
+Over Nb symbols, the detector aggregates these per-symbol values into global decision statistics:
+- R1, R2, R3 (Seco-Granados-style definitions)
 
-### Prerequisites
-
-* Python ≥ 3.11 (Windows, macOS, or Linux)
-* Git (to clone the repository)
-
-### Installation (Windows PowerShell example)
-
-```powershell
-# Clone the repo
-> git clone https://github.com/<your-user>/osnma-spoofing-detector.git
-> cd osnma-spoofing-detector
-
-# Create & activate virtual env
-> python -m venv .venv
-> .\.venv\Scripts\Activate.ps1    # Cmd: .venv\Scripts\activate.bat ; Linux: source .venv/bin/activate
-
-# Install dependencies
-(.venv) > python -m pip install --upgrade pip
-(.venv) > pip install -r requirements.txt   # currently only numpy; grows later
-```
-
-### First Run
-
-```powershell
-(.venv) > python e1b_spoofing_detector.py
-Métrica de correlación parcial (sin spoofer): 1.00
-```
-
-You should see a correlation metric ≈ +1, confirming the baseline “no-spoof” case.
+Detection is performed via a threshold test:
+- Declare attack if metric > gamma
 
 ---
 
-## 📈 Roadmap
+## 2. Repository layout
 
-* **Phase 0** ✔️ — verify ideal correlation metric.
-* **Phase 1** ➡️ — integrate AWGN noise model.
-* **Phase 2** 📊 — threshold search and ROC curve generation.
-* **Phase 3** 📈 — parameter sweeps, performance plots, and report figures.
+.
+├── main.py
+├── awgn_channel.py
+├── spoofer.py
+├── partial_correlator.py
+├── e1b_code_helpers.py
+└── experiments/
+    ├── configs.py
+    └── runner.py
 
 ---
 
-## 📝 License
+## 3. Module overview
 
-Distributed under the **MIT License**. See `LICENSE` for more information.
+- main.py
+  End-to-end entry point for:
+  - single-symbol illustrative plots
+  - many-symbol statistics and convergence plots
+  - experiment sweeps and CSV export (via experiments/)
 
+- awgn_channel.py
+  Real-valued AWGN channel model specified by C/N0 (dB-Hz) and chip rate.
+
+- spoofer.py
+  SCER-style spoofer:
+  - estimates running sign via cumulative correlation
+  - optionally uses a lock heuristic (lock_gamma) and a pre-lock mode
+  - generates replay s[n] = b_hat[n] · c[n]
+
+- partial_correlator.py
+  Per-symbol partial correlations (Bbeg, Bend) and aggregation metrics (R1, R2, R3).
+  bhat is estimated from the full-symbol correlation.
+
+- e1b_code_helpers.py
+  Helpers to convert the Galileo E1-B code from ICD hex format to ±1 chips.
+
+- experiments/configs.py
+  Dataclasses and enums for sweep configuration and scenario selection:
+  - Scenario.BASELINE (H0)
+  - Scenario.SCER (H1)
+
+- experiments/runner.py
+  Monte Carlo runner and post-processing utilities:
+  - grid sweeps over C/N0 and Nb
+  - flattening to CSV
+  - summary tables (means/percentiles)
+  - quantile threshold calibration
+  - split-based detection evaluation (cal/test separation)
+  - split-based ROC generation
+
+---
+
+## 4. Requirements
+
+- Python 3.11+
+- Dependencies:
+  - numpy
+  - matplotlib (for plots in main.py)
+
+Install via:
+python -m pip install -r requirements.txt
+
+---
+
+## 5. Quick start
+
+### 5.1 Clone and set up a virtual environment
+
+git clone https://github.com/<your-user>/<your-repo>.git
+cd <your-repo>
+
+python -m venv .venv
+# Linux/macOS:
+source .venv/bin/activate
+# Windows (PowerShell):
+# .\.venv\Scripts\Activate.ps1
+
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+
+### 5.2 Configure the E1-B code (ICD hex)
+
+In main.py, set E1B_CODE_HEX to the Galileo E1-B code in ICD hex format.
+
+### 5.3 Run the main script
+
+python main.py
+
+By default, main.py is typically configured to run the many-symbol statistics path. You can enable additional runs by uncommenting blocks under:
+if __name__ == "__main__":
+
+---
+
+## 6. Typical workflows
+
+### 6.1 Single-symbol illustrative figure (5 panels)
+
+In main.py, enable:
+run_single_symbol_plot()
+
+This produces a multi-panel figure showing:
+- authentic TX symbol
+- spoofer input (TX + AWGN)
+- spoofed output
+- cumulative correlation
+- normalized cumulative correlation
+
+### 6.2 Many-symbol run (statistics + plots)
+
+In main.py, enable:
+run = run_many_symbols_stats()
+
+This produces:
+- stabilization-time distribution plots (based on spoofer running decisions)
+- per-symbol partial correlation distributions
+- scatter plots linking stabilization to partial-correlation gaps
+- convergence plots for R1, R2, R3 vs number of symbols
+
+It also returns a dictionary containing the “source of truth” arrays for the run (tx_samples, rx_spoofer, spoofed, rx_receiver, Bbeg, Bend, etc.).
+
+### 6.3 Monte Carlo sweeps (CSV-ready results)
+
+Use the experiments package (example pattern is included in main.py):
+- build an ExperimentConfig
+- run run_experiment_grid(...)
+- save flattened rows to CSV
+- compute thresholds and detection performance
+- compute ROC curves (split-based)
+
+Outputs are typically written under a results/ directory (user-defined).
+
+---
+
+## 7. Reproducibility
+
+The experiment framework derives deterministic seeds from a single master_seed:
+- one RNG stream for symbol bits
+- one RNG stream for channel noise
+- one RNG stream for the spoofer
+
+This ensures runs are stable and repeatable when configuration parameters are unchanged.
+
+---
+
+## 8. Notes and limitations
+
+- The signal model is chip-rate and real-valued, intended for controlled experiments.
+- Receiver tracking loops, code delay estimation, and front-end filtering are out of scope.
+- The SCER spoofer is a simplified model based on running-correlation sign estimation, not a full waveform generator.
+
+---
+
+## 9. License
+
+MIT License (see LICENSE).
